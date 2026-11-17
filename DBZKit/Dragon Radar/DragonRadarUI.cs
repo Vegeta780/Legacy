@@ -1638,7 +1638,7 @@ namespace Dragon_Radar
             {
                 ArmPlacement(itemId, GenericPickupHandler, 0);
                 _placingCustomPickup = true;
-                statusLabel.Text = $"Placing item {itemId} with a custom pickup script — click the map to place it (Legacy opens right after), Esc to cancel";
+                statusLabel.Text = $"Placing item {itemId} with a custom pickup script â€” click the map to place it (Legacy opens right after), Esc to cancel";
             });
             menu.Show(menuOwner, menuAnchor);
         }
@@ -1777,7 +1777,7 @@ namespace Dragon_Radar
             _placingItemId = itemId;
             _placingCustomPickup = false; // the Custom... menu entry sets this AFTER arming
             _placingTemplate = (onPickup, collectionMsg);
-            statusLabel.Text = $"Placing item {itemId} — click the map to place it, Esc to cancel";
+            statusLabel.Text = $"Placing item {itemId} â€” click the map to place it, Esc to cancel";
         }
 
         // Zone/Area group nodes (built by MapTreeBuilder -- Tag is null for anything
@@ -2101,7 +2101,7 @@ namespace Dragon_Radar
 
                 if (entity.Width > 0 || entity.Height > 0)
                 {
-                    // Trigger zone — draw the actual rect so misalignment is obvious at a glance.
+                    // Trigger zone â€” draw the actual rect so misalignment is obvious at a glance.
                     g.DrawRectangle(pen, entity.X, entity.Y, entity.Width, entity.Height);
                 }
                 else if (entity.Kind == EntityKind.LevelGate)
@@ -2301,12 +2301,12 @@ namespace Dragon_Radar
                 EntityKind.Trigger => entity.TypeId == 0
                     ? $"Trigger #{n} ({entity.Width}x{entity.Height})"
                     : $"Trigger #{n} ({entity.Width}x{entity.Height}) if {DescribeTriggerCondition(entity.TypeId)}",
-                EntityKind.Object => $"Object #{n} — item id {entity.TypeId}",
-                EntityKind.Item => $"Item #{n} — id {entity.TypeId} (position approximate)",
-                EntityKind.Decoration => $"Decoration #{n} — frame {entity.TypeId}",
-                EntityKind.LevelGate => $"Level Gate #{n} — requires level {entity.TypeId}",
-                EntityKind.Character => $"{(IsTalkableNpc(entity) || entity.SourceAddress == 0 && entity.Variant != 2 ? "NPC" : "Actor")} #{n} — sprite {entity.TypeId}",
-                EntityKind.Enemy => $"Enemy #{n} — sprite {entity.TypeId}, stat {entity.StatIndex}",
+                EntityKind.Object => $"Object #{n} â€” item id {entity.TypeId}",
+                EntityKind.Item => $"Item #{n} â€” id {entity.TypeId} (position approximate)",
+                EntityKind.Decoration => $"Decoration #{n} â€” frame {entity.TypeId}",
+                EntityKind.LevelGate => $"Level Gate #{n} â€” requires level {entity.TypeId}",
+                EntityKind.Character => $"{(IsTalkableNpc(entity) || entity.SourceAddress == 0 && entity.Variant != 2 ? "NPC" : "Actor")} #{n} â€” sprite {entity.TypeId}",
+                EntityKind.Enemy => $"Enemy #{n} â€” sprite {entity.TypeId}, stat {entity.StatIndex}",
                 EntityKind.SpawnScript => $"Spawn Script #{n}",
                 _ => entity.Kind.ToString()
             };
@@ -2340,7 +2340,16 @@ namespace Dragon_Radar
                 if (_currentEntities[captured].Kind is not (EntityKind.Character or EntityKind.Enemy)) continue;
                 var (quest, idle) = CountDialogue(captured);
                 string who = multi ? $"{Name(captured)}: " : "";
-                menu.Items.Add(new ToolStripMenuItem($"{who}Quest Dialogue ({quest})...", null, (_, _) => OpenDialogueEditor(captured, quest: true)) { Enabled = quest > 0 });
+                // A newly placed enemy has no dialogue source until a Dialog trigger is
+                // linked to it. Do not leave Quest Dialogue permanently disabled: offer
+                // to create the required trigger and open its editor focused on quest text.
+                string questLabel = quest > 0 ? $"{who}Quest Dialogue ({quest})..." : $"{who}Create Quest Dialogue...";
+                menu.Items.Add(new ToolStripMenuItem(questLabel, null, (_, _) =>
+                {
+                    SelectEntity(captured);
+                    if (quest > 0) OpenDialogueEditor(captured, quest: true);
+                    else AddQuestDialogueTriggerForSelected();
+                }));
                 menu.Items.Add(new ToolStripMenuItem($"{who}Idle Dialogue ({idle})...", null, (_, _) => OpenDialogueEditor(captured, quest: false)) { Enabled = idle > 0 });
                 viewItems++;
             }
@@ -2897,7 +2906,7 @@ namespace Dragon_Radar
 
             string addressLabel = entity.SourceAddress == 0 ? "new, not yet saved" : $"0x{entity.SourceAddress:X}";
             string dirtyMarker = _dirty ? " [unsaved]" : "";
-            statusLabel.Text = $"{entity.Kind} @ ({entity.X},{entity.Y}) — {detail} — {addressLabel}{dirtyMarker}{warning}";
+            statusLabel.Text = $"{entity.Kind} @ ({entity.X},{entity.Y}) â€” {detail} â€” {addressLabel}{dirtyMarker}{warning}";
         }
 
         // Plain-language entity details for the Properties panel. Deliberately never shows
@@ -4444,6 +4453,36 @@ namespace Dragon_Radar
         /// </summary>
         private void addDialogueTriggerButton_Click(object? sender, EventArgs e) => AddDialogueTriggerForSelected();
 
+        /// <summary>
+        /// Creates the dialogue trigger required for an enemy/script actor (these entities
+        /// cannot start conversations through their own collision handler), then opens the
+        /// new trigger in Legacy with the Quest Dialogue view selected.
+        /// </summary>
+        private void AddQuestDialogueTriggerForSelected()
+        {
+            if (_rom == null || _game == null || _currentEntry == null) return;
+            if (_selectedIndex < 0 || _selectedIndex >= _currentEntities.Count) return;
+
+            var entity = _currentEntities[_selectedIndex];
+            if (entity.Kind is not (EntityKind.Character or EntityKind.Enemy)) return;
+            if (entity.SourceAddress == 0)
+            {
+                if (!MaterializeSelected()) return;
+                entity = _currentEntities[_selectedIndex];
+            }
+
+            var icon = CharacterIconReader.GetIcon(_rom, _game.Config, entity.TypeId);
+            int w = icon?.Width ?? 16, h = icon?.Height ?? 32;
+            const int pad = 16;
+            CreateNewTrigger(
+                (short)Math.Max(0, entity.X - (w / 2) - pad), (short)Math.Max(0, entity.Y - (h / 2) - pad),
+                (short)(entity.X + (w / 2) + pad), (short)(entity.Y + (h / 2) + pad));
+
+            // CreateNewTrigger selects the newly-created trigger and initializes a valid
+            // one-step dialogue sequence. Legacy can now replace that stub with quest lines.
+            EditSelectedPayload(dialogue: true, focus: "quest");
+        }
+
         private void AddDialogueTriggerForSelected()
         {
             if (_rom == null || _game == null || _currentEntry == null) return;
@@ -4475,7 +4514,7 @@ namespace Dragon_Radar
             {
                 _placingEnemy = (enemy.StatIndex, enemy.SpriteId);
                 _placingCharacterSpriteId = null;
-                statusLabel.Text = $"Placing enemy (stat {enemy.StatIndex}, sprite {enemy.SpriteId}) — click the map to place it, Esc to cancel";
+                statusLabel.Text = $"Placing enemy (stat {enemy.StatIndex}, sprite {enemy.SpriteId}) â€” click the map to place it, Esc to cancel";
                 return;
             }
             if (item?.Tag is not int spriteId) return;
@@ -4483,7 +4522,7 @@ namespace Dragon_Radar
             _placingNpcVariant = Math.Clamp(npcPlaceModeCombo.SelectedIndex, 0, 2);
 
             _placingCharacterSpriteId = spriteId;
-            statusLabel.Text = $"Placing NPC (sprite {spriteId}) — click the map to place it, Esc to cancel";
+            statusLabel.Text = $"Placing NPC (sprite {spriteId}) â€” click the map to place it, Esc to cancel";
         }
 
         // Writes every entity's current (possibly edited) position back into a copy
@@ -4552,7 +4591,7 @@ namespace Dragon_Radar
                 }
                 catch (NotSupportedException)
                 {
-                    // Kind without a known write-back format yet (e.g. SpawnScript) — skipped.
+                    // Kind without a known write-back format yet (e.g. SpawnScript) â€” skipped.
                 }
                 catch (InvalidOperationException ex)
                 {
